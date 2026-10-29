@@ -121,7 +121,7 @@ def main():
     # Check branch name or create main
     run("git checkout -B main")
     run("git add -A")
-    run('git commit -m "feat: initial release of 2026 GDPR & CNIL compliance auditor and legal generator"')
+    subprocess.run('git commit -m "feat: initial release of 2026 GDPR & CNIL compliance auditor and legal generator"', cwd=REPO_DIR, shell=True, capture_output=True, timeout=10)
     
     # 3. Push to remote
     remote_auth_url = f"https://x-access-token:{token}@github.com/{GITHUB_USER}/{REPO_NAME}.git"
