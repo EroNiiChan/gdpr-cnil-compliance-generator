@@ -1579,6 +1579,244 @@ https://eroniichan.gumroad.com/l/gdpr-cnil-pack`;
       updateDpaPreview();
       updatePolicyPreview();
     });
+  
+
+/**
+ * Web3 1-Click Base L2 Direct Checkout
+ * All payments settle instantly into the merchant treasury:
+ * Merchant Wallet: 0x853d1b8C424bCD526D531efC7E87532eE17690a4
+ * Base L2 ChainId: 8453 (0x2105)
+ * Native USDC on Base: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+ */
+
+const TREASURY_WALLET = "0x853d1b8C424bCD526D531efC7E87532eE17690a4";
+const BASE_USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const BASE_CHAIN_ID_HEX = "0x2105"; // 8453
+const BASE_CHAIN_ID_DEC = 8453;
+const BASE_RPC_URL = "https://mainnet.base.org";
+const PRICE_USDC = "9.00";
+// 9 USDC with 6 decimals = 9,000,000 = 0x895440
+const PRICE_USDC_RAW_HEX = "0000000000000000000000000000000000000000000000000000000000895440";
+// ERC20 transfer(address,uint256) selector: 0xa9059cbb
+const TREASURY_PADDED = "000000000000000000000000853d1b8c424bcd526d531efc7e87532ee17690a4";
+const USDC_TRANSFER_CALLDATA = "0xa9059cbb" + TREASURY_PADDED + PRICE_USDC_RAW_HEX;
+
+async function ensureBaseNetwork() {
+  if (!window.ethereum) {
+    throw new Error("No Web3 wallet found. Please install MetaMask, Coinbase Wallet, Rabby, or Phantom.");
+  }
+  const currentChain = await window.ethereum.request({ method: 'eth_chainId' });
+  if (currentChain !== BASE_CHAIN_ID_HEX && parseInt(currentChain, 16) !== BASE_CHAIN_ID_DEC) {
+    try {
+      await window.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: BASE_CHAIN_ID_HEX }]
+      });
+    } catch (switchError) {
+      if (switchError.code === 4902) {
+        await window.ethereum.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId: BASE_CHAIN_ID_HEX,
+            chainName: 'Base',
+            nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+            rpcUrls: [BASE_RPC_URL],
+            blockExplorerUrls: ['https://basescan.org']
+          }]
+        });
+      } else {
+        throw switchError;
+      }
+    }
+  }
+}
+
+async function payWithBaseUSDC() {
+  const statusEl = document.getElementById("web3PayStatus");
+  const payBtn = document.getElementById("btnPayUSDC");
+  try {
+    if (payBtn) payBtn.disabled = true;
+    if (statusEl) {
+      statusEl.style.display = "block";
+      statusEl.innerHTML = "⏳ Connecting to your wallet on Base L2...";
+    }
+    await ensureBaseNetwork();
+
+    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    const userAddress = accounts[0];
+
+    if (statusEl) {
+      statusEl.innerHTML = "⏳ Please confirm transfer of <strong>9.00 USDC</strong> in your wallet...";
+    }
+
+    const txHash = await window.ethereum.request({
+      method: 'eth_sendTransaction',
+      params: [{
+        from: userAddress,
+        to: BASE_USDC_CONTRACT,
+        data: USDC_TRANSFER_CALLDATA
+      }]
+    });
+
+    if (statusEl) {
+      statusEl.innerHTML = `📡 Transaction sent! <a href="https://basescan.org/tx/${txHash}" target="_blank" style="color:var(--accent);">View on BaseScan</a><br>⏳ Verifying on Base L2 blockchain...`;
+    }
+
+    await pollTransactionConfirmation(txHash);
+
+  } catch (err) {
+    console.error("Web3 payment error:", err);
+    if (statusEl) {
+      statusEl.innerHTML = `<span style="color:#ef4444;">❌ ${err.message || 'Payment cancelled or failed.'}</span>`;
+    }
+  } finally {
+    if (payBtn) payBtn.disabled = false;
+  }
+}
+
+async function payWithBaseETH() {
+  const statusEl = document.getElementById("web3PayStatus");
+  const payBtn = document.getElementById("btnPayETH");
+  try {
+    if (payBtn) payBtn.disabled = true;
+    if (statusEl) {
+      statusEl.style.display = "block";
+      statusEl.innerHTML = "⏳ Connecting to your wallet on Base L2...";
+    }
+    await ensureBaseNetwork();
+
+    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    const userAddress = accounts[0];
+
+    // ~9 EUR in ETH at $2,250 ETH = ~0.0043 ETH = 4300000000000000 wei = 0xf49f2ca00000
+    const ethValueHex = "0xf49f2ca00000";
+
+    if (statusEl) {
+      statusEl.innerHTML = "⏳ Please confirm transfer of ~0.0043 ETH on Base in your wallet...";
+    }
+
+    const txHash = await window.ethereum.request({
+      method: 'eth_sendTransaction',
+      params: [{
+        from: userAddress,
+        to: TREASURY_WALLET,
+        value: ethValueHex
+      }]
+    });
+
+    if (statusEl) {
+      statusEl.innerHTML = `📡 Transaction sent! <a href="https://basescan.org/tx/${txHash}" target="_blank" style="color:var(--accent);">View on BaseScan</a><br>⏳ Verifying on Base L2 blockchain...`;
+    }
+
+    await pollTransactionConfirmation(txHash);
+
+  } catch (err) {
+    console.error("Web3 payment error:", err);
+    if (statusEl) {
+      statusEl.innerHTML = `<span style="color:#ef4444;">❌ ${err.message || 'Payment cancelled or failed.'}</span>`;
+    }
+  } finally {
+    if (payBtn) payBtn.disabled = false;
+  }
+}
+
+async function pollTransactionConfirmation(txHash) {
+  const statusEl = document.getElementById("web3PayStatus");
+  let attempts = 0;
+  const maxAttempts = 30;
+
+  while (attempts < maxAttempts) {
+    await new Promise(r => setTimeout(r, 2000));
+    attempts++;
+    try {
+      const resp = await fetch(BASE_RPC_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "eth_getTransactionReceipt",
+          params: [txHash]
+        })
+      });
+      const data = await resp.json();
+      if (data.result && data.result.status === "0x1") {
+        if (statusEl) {
+          statusEl.innerHTML = `✅ <strong>Paiement reçu sur Base L2 !</strong><br>🎉 Déblocage de votre pack Pro...`;
+        }
+        localStorage.setItem("eu_compliance_unlocked", "true");
+        localStorage.setItem("eu_compliance_tx_verified", txHash);
+        setTimeout(() => {
+          if (typeof showUnlockedView === "function") showUnlockedView();
+          if (typeof downloadFullProBundle === "function") downloadFullProBundle();
+        }, 1200);
+        return;
+      }
+    } catch (e) {
+      console.warn("RPC poll error:", e);
+    }
+  }
+  if (statusEl) {
+    statusEl.innerHTML = `⚠️ La transaction a été soumise (${txHash.slice(0, 10)}...). Si elle tarde à confirmer, collez le hash dans la boîte de vérification ci-dessous.`;
+  }
+}
+
+async function verifyManualTxHash() {
+  const input = document.getElementById("cryptoTxInput");
+  const txHash = input ? input.value.trim() : "";
+  const statusEl = document.getElementById("web3PayStatus");
+
+  if (!txHash || !txHash.startsWith("0x") || txHash.length < 60) {
+    alert("Veuillez saisir un hash de transaction valide (commençant par 0x...).");
+    return;
+  }
+
+  if (statusEl) {
+    statusEl.style.display = "block";
+    statusEl.innerHTML = "⏳ Vérification de la transaction sur Base L2...";
+  }
+
+  try {
+    const resp = await fetch(BASE_RPC_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "eth_getTransactionReceipt",
+        params: [txHash]
+      })
+    });
+    const data = await resp.json();
+    if (data.result && data.result.status === "0x1") {
+      if (statusEl) {
+        statusEl.innerHTML = `✅ <strong>Transaction confirmée sur Base L2 !</strong>`;
+      }
+      localStorage.setItem("eu_compliance_unlocked", "true");
+      localStorage.setItem("eu_compliance_tx_verified", txHash);
+      setTimeout(() => {
+        if (typeof showUnlockedView === "function") showUnlockedView();
+        if (typeof downloadFullProBundle === "function") downloadFullProBundle();
+      }, 1000);
+    } else {
+      alert("Transaction introuvable ou en attente sur Base L2. Vérifiez le hash et réessayez.");
+    }
+  } catch (err) {
+    alert("Erreur de connexion RPC Base. Veuillez réessayer dans quelques instants.");
+  }
+}
+
+  
+    function downloadFullProBundle() {
+      const zipUrl = 'dist/pro_bundle_2026.zip';
+      const a = document.createElement('a');
+      a.href = zipUrl;
+      a.download = 'pro_bundle_2026.zip';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+
   </script>
 </body>
 </html>
